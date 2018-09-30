@@ -1,0 +1,144 @@
+---
+title: "Through processing_node_files"
+author: "Apoorb"
+date: "May 31, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+#2 Set Directory
+dir1="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/DetectorSwitching/Scenarios"
+dir1="/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/DetectorSwitching/Scenarios"
+dir=dir1
+knitr::opts_knit$set(echo = TRUE,root.dir = dir)
+```
+
+
+#1 Loading the Libraries
+```{r, results="hide"}
+#********************************************************************************************************
+getwd()
+#********************************************************************************************************
+#3 Loading Libraries
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+#fread by default create data table. 
+options(datatable.fread.datatable=TRUE)
+```
+#2 Reading the Node Results files   
+(Node results files sometimes cotain file for base network. Delete it manually)
+```{r, results="hide"}
+#********************************************************************************************************
+#Finidng att files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern="_Node Results_")
+#For Tesing the code logic
+file<-files[[1]]
+#Create empty data tables
+#da contains the Average values for delay, Qlen ...
+da<-data.table()
+#tda contains the second by second value for delay Qlen etc .... This is used to plot
+#residual queue at the start of green 
+tda<-data.table()
+#Loop through all the node evaluation files 
+file<-files[1]
+
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReaderDetSwitching.R")
+
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReaderDetSwitching.R")
+buf1<-NodeFileReader(files,dir)
+
+da<-buf1[[1]]
+tda<-buf1[[2]]
+
+#The following code is needed if multiple runs are conducted
+#This code can be used to average out the values 
+da[,Qlen1:=round(mean(Qlen),digits = 2),by=list(no,dir)]
+da[,veh_delay1:=round(mean(veh_delay),digits = 2),by=list(no,dir)]
+da[,Qlen:=Qlen1]
+da[,veh_delay:=veh_delay1]
+da<-unique(da,by=c("no","dir"))
+da<-da[,.(no,dir,veh_delay,Qlen)]
+fwrite(da,"avg_Q.csv")
+```
+
+#3 Read List of scenarios and Merge above data table. Plot Delay and Queue
+```{r, results="hide"}
+setnames(da,"no","Scenario")
+list_sen<-fread("ListSen_DetSwitch.csv")
+da<-merge(da,list_sen,by.x="Scenario",by.y="Scenario")
+
+
+gap_label<-c(`0.1`="0.1 Sec Passage time",`2.5`="2.5 Sec Passage time",`5`="5 Sec Passage time")
+
+da[dir=="all",dir:="Intersection"]
+da[dir=="ebt",dir:="EBT"]
+da[dir=="wbt",dir:="WBT"]
+da[dir=="nbt",dir:="NBT"]
+da[dir=="sbt",dir:="SBT"]
+da[dir=="eblt",dir:="EBLT"]
+da[dir=="sblt",dir:="SBLT"]
+
+
+da[dir=="nbt",dir:="NBT-60ft Det"]
+
+library(RColorBrewer)
+EBLTvol_label<-c(`200`="EBLT =\n200 veh/hr",`250`="EBLT =\n250 veh/hr",`300`="EBLT =\n300 veh/hr",`350`="EBLT =\n350 veh/hr",`400`="EBLT =\n400 veh/hr")
+SBLTvol_label<-c(`200`="SBLT =\n200 veh/hr",`250`="SBLT =\n250 veh/hr",`300`="SBLT =\n300 veh/hr",`350`="SBLT =\n350 veh/hr",`400`="SBLT =\n400 veh/hr")
+
+darkcols <- brewer.pal(8, "Dark2")
+
+a<-ggplot(da[Scenario<=10 & dir %in% c("EBT","WBT","EBLT","Intersection"),],aes(x=factor(dir),y=veh_delay,fill=as.factor(`Det Switching`)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`EBLT Volume`,labeller = labeller(`EBLT Volume`=EBLTvol_label))+scale_fill_manual(name="Detector\nSwitching",values=darkcols[c(2,1)])+labs(x="Direction",y="Average Delay (veh-sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,35)
+
+a1<-ggplot(da[Scenario>10& dir %in% c("NBT","SBT","SBLT","Intersection"),],aes(x=factor(dir),y=veh_delay,fill=as.factor(`Det Switching`)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`SBLT`,labeller = labeller(`SBLT`=SBLTvol_label))+scale_fill_manual(name="Detector\nSwitching",values=darkcols[c(2,1)])+labs(x="Direction",y="Average Delay (veh-sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,35)
+
+
+b<-ggplot(da[Scenario<=10 & dir %in% c("EBT","WBT","EBLT","Intersection"),],aes(x=factor(dir),y=Qlen,fill=as.factor(`Det Switching`)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`EBLT Volume`,labeller = labeller(`EBLT Volume`=EBLTvol_label))+scale_fill_manual(name="Detector\nSwitching",values=darkcols[c(2,1)])+labs(x="Direction",y="Average Queue Length (ft)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,75)
+
+b1<-ggplot(da[Scenario>10& dir %in% c("NBT","SBT","SBLT","Intersection"),],aes(x=factor(dir),y=Qlen,fill=as.factor(`Det Switching`)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`SBLT`,labeller = labeller(`SBLT`=SBLTvol_label))+scale_fill_manual(name="Detector\nSwitching",values=darkcols[c(2,1)])+labs(x="Direction",y="Average Queue Length (ft)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,75)
+# 
+# a<-ggplot(da[Scenario<=10 & dir %in% c("EBT","WBT","EBLT","All"),],aes(x=factor(`Det Switching`),y=veh_delay,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`EBLT Volume`,labeller = labeller(`EBLT Volume`=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:7])+labs(title="Delay for varying EBLT Volume",x="Detector Switching",y="Average Delay (veh-sec/sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,40)
+
+# a1<-ggplot(da[Scenario>10& dir %in% c("NBT","SBT","SBLT","All"),],aes(x=factor(`Det Switching`),y=veh_delay,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`SBLT`,labeller = labeller(`SBLT`=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:7])+labs(title="Delay for varying SBLT Volume",x="Detector Switching",y="Average Delay (veh-sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,40)
+# 
+# b<-ggplot(da[Scenario<=10& dir %in% c("EBT","WBT","EBLT","All"),],aes(x=factor(`Det Switching`),y=Qlen,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`EBLT Volume`,labeller = labeller(`EBLT Volume`=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:7])+labs(title="Average Queue Length for varying EBLT Volume",x="Detector Switching",y="Average Queue Length (ft)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,100)
+# 
+# b1<-ggplot(da[Scenario>10& dir %in% c("NBT","SBT","SBLT","All"),],aes(x=factor(`Det Switching`),y=Qlen,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(~`SBLT`,labeller = labeller(`SBLT`=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:7])+labs(title="Average Queue Length for varying SBLT Volume",x="Detector Switching",y="Average Queue Length (ft)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,100)
+
+
+
+```
+
+#D Saving plots in pdf for printing 
+```{r}
+#pdf("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/detSwitch.pdf")
+pdf("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/detSwitch.pdf")
+a
+b
+a1
+b1
+graphics.off()
+setwd("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results")
+tiff("detSwitchDelayEBLT.tiff",width=14,height=7,units = "cm",res=250)
+a
+graphics.off()
+tiff("detSwitchQueueEBLT.tiff",width=14,height=7,units = "cm",res=250)
+b
+graphics.off()
+tiff("detSwitchDelaySBLT.tiff",width=14,height=7,units = "cm",res=250)
+a1
+graphics.off()
+tiff("detSwitchQueueSBLT.tiff",width=14,height=7,units = "cm",res=250)
+b1
+graphics.off()
+```
+
+```{r}
+
+```
+

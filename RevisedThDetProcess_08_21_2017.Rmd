@@ -1,0 +1,224 @@
+---
+title: "Through processing_node_files"
+author: "Apoorb"
+date: "May 31, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+#2 Set Directory
+dir1="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_STbar_Scenario/Scenarios"
+dir2="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_STbar_Video/Scenarios"
+dir=dir2
+#dir=dir1
+knitr::opts_knit$set(echo = TRUE,root.dir = dir)
+```
+
+
+#1 Loading the Libraries
+```{r, results="hide"}
+#********************************************************************************************************
+getwd()
+#********************************************************************************************************
+#3 Loading Libraries
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+#fread by default create data table. 
+options(datatable.fread.datatable=TRUE)
+```
+#2 Reading the Node Results files   
+(Node results files sometimes cotain file for base network. Delete it manually)
+```{r, results="hide"}
+#********************************************************************************************************
+#Finidng att files 
+#Find and store the files which contains length in their names
+setwd(dir)
+
+files<-list.files(pattern="_Node Results_")
+#For Tesing the code logic
+file<-files[[1]]
+#Create empty data tables
+#da contains the Average values for delay, Qlen ...
+da<-data.table()
+#tda contains the second by second value for delay Qlen etc .... This is used to plot
+#residual queue at the start of green 
+tda<-data.table()
+#Loop through all the node evaluation files 
+source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReader.R")
+directory=dir
+buf1<-NodeFileReader(files,dir)
+da<-buf1[[1]]
+tda<-buf1[[2]]
+
+#The following code is needed if multiple runs are conducted
+#This code can be used to average out the values 
+da[,Qlen1:=round(mean(Qlen),digits = 2),by=list(no,dir)]
+da[,veh_delay1:=round(mean(veh_delay),digits = 2),by=list(no,dir)]
+da[,stop_delay1:=round(mean(stop_delay),digits = 2),by=list(no,dir)]
+da[,stops1:=round(mean(stops),digits = 2),by=list(no,dir)]
+da[,Qlen:=Qlen1]
+da[,veh_delay:=veh_delay1]
+da[,stop_delay:=stop_delay1]
+da[,stops:=stops1]
+da<-unique(da,by=c("no","dir"))
+da<-da[,.(no,dir,stops,veh_delay,Qlen)]
+fwrite(da,"avg_Q.csv")
+```
+#3 Read List of scenarios and Merge above data table. Plot Delay and Queue
+```{r, results="hide"}
+setnames(da,"no","Scenario")
+list_sen<-fread("Scenario_Through_STbar.csv")
+da<-merge(da,list_sen)
+
+
+gap_label<-c(`0.1`="0.1 Sec Passage time",`2.5`="2.5 Sec Passage time",`5`="5 Sec Passage time")
+vol_label<-c(`400`="400 veh/hr",`800`="800 veh/hr",`1200`="1200 veh/hr")
+da[dir=="all",dir:="All"]
+da[dir=="ebt",dir:="EBT"]
+da[dir=="nbt",dir:="NBT-60ft Det"]
+
+
+if(dir1==dir){
+  det_type<-"Induction Loop Detectors"
+}else{
+  det_type<-"Video Detectors"
+}
+
+library(RColorBrewer)
+darkcols <- brewer.pal(8, "Dark2")
+a<-ggplot(da,aes(x=factor(Passage_time),y=veh_delay,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:3])+labs(title=paste("Average Delay",det_type,sep=" "),x="Passage Time (sec)",y="Average Delay (veh-sec/sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,80)
+
+b<-ggplot(da,aes(x=factor(Passage_time),y=Qlen,fill=as.factor(dir)))+geom_bar(stat="Identity",colour="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+scale_fill_manual(name="Direction",values=darkcols[1:3])+labs(title=paste("Average Queue Length",det_type,sep=" "),x="Passage Time (sec)",y="Average Queue Length (ft/sec)")+ theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1))+ylim(0,1200)
+
+```
+
+
+#EBT
+#4 Read all the Signal Change Files. Read the notes in Detector Project notebook to understand the format
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+SdaEBT<-data.table()
+source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+SdaEBT<-scTimeRead_seed1(6,files)
+
+```
+
+#EBT Residual Queue
+#6 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda1<-tda
+tda1[,c("st","et"):=tstrsplit(tint,"-")]
+tda1[,et:=as.numeric(et)]
+tda1<-tda1[,.(et,no,run_no,dir,Qlen)]
+SdaEBT<-SdaEBT[Indi_cor=="amber"]
+tda1<-tda1[dir=="ebt",]
+EBT_residualQ<-merge(tda1,SdaEBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+EBT_residualQ<-EBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+EBT_residualQ<-EBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+EBT_residualQ<-unique(EBT_residualQ,by=c("no"))
+EBT_residualQ<-merge(EBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ<-ggplot(EBT_residualQ,aes(x=as.factor(Passage_time),y=AvgResQ,fill=as.factor(Passage_time)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("EBT Average Residual Queues",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Average Residual Queues (ft/sec)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,1200)
+
+```
+
+
+
+
+# NBT Residual Queue
+#7 Read all the Signal Change Files. Read the notes in Detector Project notebook to understand the format
+#Reading files for phase 4 (NBT)
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+par(mfrow=c(2,2))
+SdaNBT<-data.table()
+source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+SdaNBT<-scTimeRead_seed1(4,files)
+```
+
+#NBT
+#9 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#**********************************************************************************************************************
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda2<-tda
+tda2[,c("st","et"):=tstrsplit(tint,"-")]
+tda2[,et:=as.numeric(et)]
+tda2<-tda2[,.(et,no,run_no,dir,Qlen)]
+SdaNBT<-SdaNBT[Indi_cor=="amber"]
+tda2<-tda2[dir=="nbt",]
+NBT_residualQ<-merge(tda2,SdaNBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+NBT_residualQ<-NBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+NBT_residualQ<-NBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+NBT_residualQ<-unique(NBT_residualQ,by=c("no"))
+NBT_residualQ<-merge(NBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ1<-ggplot(NBT_residualQ,aes(x=as.factor(Passage_time),y=AvgResQ,fill=as.factor(Passage_time)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("NBT Average Residual Queues",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Average Residual Queues (ft/sec)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,1200)
+
+```
+
+
+#C Reading the SC Detector record
+```{r}
+#Finidng .ldp files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("*.ldp"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+listSen<-fread("Scenario_Through_STbar.csv")
+SdaMax<-data.table()
+source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScDetectorRecordFileReader.R")
+store_SCL<-ScMaxOutFun(files,listSen)
+SdaMax<-store_SCL[[1]]
+SdaMax<-SdaMax[,lapply(.SD,mean),by=list(no)]
+
+
+gmax1a<-ggplot(SdaMax,aes(x=as.factor(PassageTime),y=Per_EBT_MaxOout,fill=as.factor(PassageTime)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("EBT Max Outs",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Percent Max Outs (%)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,100)
+
+gmax2a<-ggplot(SdaMax,aes(x=as.factor(PassageTime),y=Per_NBT_MaxOout,fill=as.factor(PassageTime)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("NBT Max Outs",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Percent Max Outs (%)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,100)
+```
+
+```{r}
+MeanTime<-store_SCL[[2]]
+MeanTime<-MeanTime[,lapply(.SD,mean),by=list(no)]
+
+
+AvgGr6<-ggplot(MeanTime,aes(x=as.factor(PassageTime),y=MeanGr6,fill=as.factor(PassageTime)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("Average EBT Green Time",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Average EBT Green Time (sec)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,80)
+
+AvgGr4<-ggplot(MeanTime,aes(x=as.factor(PassageTime),y=MeanGr4,fill=as.factor(PassageTime)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT_Vol~.,labeller=labeller(EBT_Vol=vol_label))+ggtitle(paste("Average NBT Green Time",det_type,sep=" "))+xlab("EBT Passage Time (sec)")+ylab("Average NBT Green Time (sec)")+theme_bw()+scale_fill_manual(name="EBT Passage Time (sec)",values=darkcols[1:8])+ylim(0,80)
+```
+
+
+
+#D Saving plots in pdf for printing 
+```{r}
+if(dir==dir1){
+  pdf("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/Through_InducLp_STbar.pdf")
+} else{
+    pdf("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/Through_Vid_STbar.pdf")
+
+}
+a
+b
+gResQ
+gResQ1
+gmax1a
+gmax2a
+AvgGr6
+AvgGr4
+graphics.off()
+```

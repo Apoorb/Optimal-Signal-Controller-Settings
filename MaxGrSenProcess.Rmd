@@ -1,0 +1,310 @@
+---
+title: "Through processing_node_files"
+author: "Apoorb"
+date: "May 31, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+#2 Set Directory
+dir1="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Scenario_MaxGr/Scenarios"
+dir1="/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Scenario_MaxGr/Scenarios"
+dir=dir1
+knitr::opts_knit$set(echo = TRUE,root.dir = dir)
+```
+
+
+#1 Loading the Libraries
+```{r, results="hide"}
+#********************************************************************************************************
+getwd()
+#********************************************************************************************************
+#3 Loading Libraries
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+#fread by default create data table. 
+options(datatable.fread.datatable=TRUE)
+```
+#2 Reading the Node Results files   
+(Node results files sometimes cotain file for base network. Delete it manually)
+```{r, results="hide"}
+#********************************************************************************************************
+#Finidng att files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern="_Node Results_")
+#For Tesing the code logic
+file<-files[[1]]
+#Create empty data tables
+#da contains the Average values for delay, Qlen ...
+da<-data.table()
+#tda contains the second by second value for delay Qlen etc .... This is used to plot
+#residual queue at the start of green 
+tda<-data.table()
+#Loop through all the node evaluation files 
+file<-files[1]
+
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReader.R")
+buf1<-NodeFileReader(files,dir)
+
+da<-buf1[[1]]
+tda<-buf1[[2]]
+
+#The following code is needed if multiple runs are conducted
+#This code can be used to average out the values 
+da[,Qlen1:=round(mean(Qlen),digits = 2),by=list(no,dir)]
+da[,veh_delay1:=round(mean(veh_delay),digits = 2),by=list(no,dir)]
+da[,stop_delay1:=round(mean(stop_delay),digits = 2),by=list(no,dir)]
+da[,stops1:=round(mean(stops),digits = 2),by=list(no,dir)]
+da[,Qlen:=Qlen1]
+da[,veh_delay:=veh_delay1]
+da[,stop_delay:=stop_delay1]
+da[,stops:=stops1]
+da<-unique(da,by=c("no","dir"))
+da<-da[,.(no,dir,stops,veh_delay,Qlen)]
+fwrite(da,"avg_Q.csv")
+```
+
+#3 Read List of scenarios and Merge above data table. Plot Delay and Queue
+```{r, results="hide"}
+setnames(da,"no","Scenario")
+list_sen<-fread("List_of_ScenarioMaxGr.csv")
+list_sen[,MaxGrSet:=factor(MaxGrSet,levels=c("TSOH","plus5","plus10"),ordered=TRUE)]
+da<-merge(da,list_sen,by.x="Scenario",by.y="S.No")
+LnDist_label<-c(`50`="50-50 Lane\nDistribution",`75`="75-25 Lane\nDistribution")
+gap_label<-c(`0.1`="0.1 Sec Passage time",`2.5`="2.5 Sec Passage time",`5`="5 Sec Passage time")
+vol_label<-c(`400`="400 veh/hr",`800`="800 veh/hr",`1200`="1200 veh/hr")
+da[dir=="all",dir:="Intersection"]
+da[dir=="ebt",dir:="EBT"]
+da[dir=="nbt",dir:="NBT"]
+
+
+
+vol_label<-c(`800`="800 veh/hr",`1600`="1600 veh/hr",`2400`="2400 veh/hr")
+
+da$EBT=da$`EBT Vol Ln1`+da$`EBT Vol Ln2`
+library(RColorBrewer)
+darkcols <- brewer.pal(8, "Dark2")
+
+Vlab<-c(`800`="EBT = 800 veh/hr",`1600`="EBT = 1600 veh/hr",`2400`="EBT = 2400 veh/hr")
+
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/GGplots_Function.R")
+
+a_comb<-TwoLndet_plots(data1=da,
+             x1=factor(`Passage Time`),
+             y1=veh_delay,
+             fill1=factor(MaxGrSet),
+             facet1=`EBT`~`Ln Dist`*dir,
+             ylab1="Average Delay (veh-sec)",
+             title1="Average Delay Length for Stopbar Detectors -Two Lanes",
+             vol_label=Vlab
+)
+a_comb<-a_comb+ylim(0,55)+scale_fill_manual(name="Maximum Green\n Setting",values=darkcols[1:3])
+
+
+b_comb<-TwoLndet_plots(data1=da,
+             x1=factor(`Passage Time`),
+             y1=Qlen,
+             fill1=factor(MaxGrSet),
+             facet1=`EBT`~`Ln Dist`*`dir`,
+             ylab1="Average Queue Length (ft)",
+             title1="Average Queue Length for Stopbar Detectors -Two Lanes",
+             vol_label=Vlab
+             
+)
+b_comb<-b_comb+ylim(0,1200)+scale_fill_manual(name="Maximum Green\n Setting",values=darkcols[1:3])
+```
+
+#C Reading the SC Detector record
+```{r}
+#Finidng .ldp files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("*.ldp"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+SdaMax<-data.table()
+listSen<-list_sen
+setnames(listSen,"S.No","Scenario")
+listSen[,EBT:=`EBT Vol Ln1`+`EBT Vol Ln2`]
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScDetectorRecordFileReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScDetectorRecordFileReader.R")
+
+store_SCL<-ScMaxOutFun(files,listSen)
+
+SdaMax<-store_SCL[[1]]
+SdaMax<-SdaMax[,lapply(.SD,mean),by=list(no)]
+
+SdaMax<-merge(list_sen,SdaMax,by.x="Scenario",by.y="no")
+  
+gmax_a_comb<-TwoLndet_plots_2(data1=SdaMax,
+                    x1=factor(`Passage Time`),
+                    y1=Per_EBT_MaxOout,
+                    fill1=MaxGrSet,
+                    facet1=`EBT`~`Ln Dist`,
+                    ylab1="Percent Max Outs (%)",
+                    title1="EBT Max Outs",
+                    vol_label=Vlab
+)
+gmax_a_comb<-gmax_a_comb+ylim(0,100)+scale_fill_manual(name="Maximum Green\n Setting",values=darkcols[1:3])
+
+gmax_b_comb<-TwoLndet_plots_2(data1=SdaMax,
+                    x1=factor(`Passage Time`),
+                    y1=Per_NBT_MaxOout,
+                    fill1=MaxGrSet,
+                    facet1=`EBT`~`Ln Dist`,
+                    ylab1="Percent Max Outs (%)",
+                    title1="NBT Max Outs",
+                    vol_label=Vlab
+)
+gmax_b_comb<-gmax_b_comb+ylim(0,100)+ylim(0,100)+scale_fill_manual(name="Maximum Green\n Setting",values=darkcols[1:3])
+```
+
+```{r}
+MeanTime<-store_SCL[[2]]
+MeanTime<-MeanTime[,lapply(.SD,mean),by=list(no)]
+MeanTime<-merge(list_sen,MeanTime,by.x="Scenario",by.y="no")
+
+
+AvgGr6<-ggplot(MeanTime,aes(x=as.factor(PassageTime),y=MeanGr6,fill=as.factor(MaxGrSet)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT~`Ln Dist`,labeller=labeller(EBT=vol_label,`Ln Dist`=LnDist_label))+ggtitle("Average EBT Green Time")+xlab("EBT Passage Time (sec)")+ylab("Average EBT Green Time (sec)")+theme_bw()+scale_fill_manual("Maximum Green\n Setting",values=darkcols[1:3])+ylim(0,100)+theme(axis.text.x = element_text(angle=45,hjust=1))
+
+AvgGr4<-ggplot(MeanTime,aes(x=as.factor(PassageTime),y=MeanGr4,fill=as.factor(MaxGrSet)))+geom_bar(stat="Identity",color="black",position=position_dodge())+facet_grid(EBT~`Ln Dist`,labeller=labeller(EBT=vol_label,`Ln Dist`=LnDist_label))+ggtitle("Average NBT Green Time")+xlab("EBT Passage Time (sec)")+ylab("Average NBT Green Time (sec)")+theme_bw()+scale_fill_manual("Maximum Green\n Setting",values=darkcols[1:3])+ylim(0,80)+theme(axis.text.x = element_text(angle=45,hjust=1))
+```
+
+#EBT Residual Queue
+#6 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+SdaEBT<-data.table()
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+
+SdaEBT<-scTimeRead_seed1(6,files)
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda1<-tda
+tda1[,c("st","et"):=tstrsplit(tint,"-")]
+tda1[,et:=as.numeric(et)]
+tda1<-tda1[,.(et,no,run_no,dir,Qlen)]
+SdaEBT<-SdaEBT[Indi_cor=="amber"]
+tda1<-tda1[dir=="ebt",]
+EBT_residualQ<-merge(tda1,SdaEBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+EBT_residualQ<-EBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+EBT_residualQ<-EBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+EBT_residualQ<-unique(EBT_residualQ,by=c("no"))
+EBT_residualQ<-merge(EBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ_EB<-TwoLndet_plots_2(data1=EBT_residualQ,
+                    x1=factor(`Passage Time`),
+                    y1=AvgResQ,
+                    fill1=MaxGrSet,
+                    facet1=`EBT`~`Ln Dist`,
+                    ylab1="Average Residual Queues (ft)",
+                    title1="2 Lanes Avg Res Q",
+                    vol_label=Vlab
+)
+gResQ_EB<-gResQ_EB+ylim(0,2000)+scale_fill_manual("Maximum Green\n Setting",values=darkcols[1:3])
+```
+
+# NBT Residual Queue
+#7 Read all the Signal Change Files. Read the notes in Detector Project notebook to understand the format
+#Reading files for phase 4 (NBT)
+#9 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+par(mfrow=c(2,2))
+SdaNBT<-data.table()
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+
+SdaNBT<-scTimeRead_seed1(4,files)
+#**********************************************************************************************************************
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda2<-tda
+tda2[,c("st","et"):=tstrsplit(tint,"-")]
+tda2[,et:=as.numeric(et)]
+tda2<-tda2[,.(et,no,run_no,dir,Qlen)]
+SdaNBT<-SdaNBT[Indi_cor=="amber"]
+tda2<-tda2[dir=="nbt",]
+NBT_residualQ<-merge(tda2,SdaNBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+NBT_residualQ<-NBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+NBT_residualQ<-NBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+NBT_residualQ<-unique(NBT_residualQ,by=c("no"))
+NBT_residualQ<-merge(NBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ_NB<-TwoLndet_plots_2(data1=NBT_residualQ,
+                    x1=factor(`Passage Time`),
+                    y1=AvgResQ,
+                    fill1=MaxGrSet,
+                    facet1=`EBT`~`Ln Dist`,
+                    ylab1="Average Residual Queues (ft)",
+                    title1="2 Lanes Avg Res Q",
+                    vol_label=Vlab
+)
+gResQ_NB<-gResQ_NB+ylim(0,2000)+scale_fill_manual("Maximum Green\n Setting",values=darkcols[1:3])
+```
+
+
+#D Saving plots in pdf for printing 
+```{r}
+mainDir<-"/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results"
+subDir<-"MaxGrres"
+dir.create(file.path(mainDir, subDir))
+tem<-file.path(mainDir, subDir)
+
+
+jpeg(file.path(tem,"MaxGrAvgGr4.jpeg"),width=17,height=12,units = "cm",res=1000)
+AvgGr4
+graphics.off()
+
+jpeg(file.path(tem,"MaxGrAvgGr6.jpeg"),width=17,height=12,units = "cm",res=1000)
+AvgGr6
+graphics.off()
+
+jpeg(file.path(tem,"MaxGrDelay.jpeg"),width=17,height=12,units = "cm",res=1000)
+a_comb
+graphics.off()
+jpeg(file.path(tem,"MaxGrQue.jpeg"),width=17,height=12,units = "cm",res=1000)
+b_comb
+graphics.off()
+jpeg(file.path(tem,"MaxGrEBMax.jpeg"),width=14,height=12,units = "cm",res=1000)
+gmax_a_comb
+graphics.off()
+jpeg(file.path(tem,"MaxGrNBMax.jpeg"),width=14,height=12,units = "cm",res=500)
+gmax_b_comb
+graphics.off()
+jpeg(file.path(tem,"MaxGrEBRes.jpeg"),width=14,height=12,units = "cm",res=500)
+gResQ_EB
+graphics.off()
+jpeg(file.path(tem,"MaxGrNBRes.jpeg"),width=14,height=12,units = "cm",res=500)
+gResQ_NB
+graphics.off()
+
+pdf(file.path(tem,"MaxGrPlt RandSeed 10-15.pdf"),width=17,height=12)
+AvgGr6
+AvgGr4
+a_comb
+b_comb
+gmax_a_comb
+gmax_b_comb
+gResQ_EB
+gResQ_NB
+dev.off()
+```
+
+
+```{r}
+
+```
+

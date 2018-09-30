@@ -1,0 +1,371 @@
+---
+title: "Through processing_node_files"
+author: "Apoorb"
+date: "Dec 1, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+#2 Set Directory
+#dir1="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrm_Scenario_2ln/Scenarios"
+dir1="/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrm_Scenario_2ln/Scenarios"
+#dir2="C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrmRadar_Scenario_2ln/Scenarios"
+
+dir=dir1
+#dir=dir1
+knitr::opts_knit$set(echo = TRUE,root.dir = dir)
+```
+
+
+#1 Loading the Libraries
+```{r, results="hide"}
+#********************************************************************************************************
+getwd()
+#********************************************************************************************************
+#3 Loading Libraries
+library(data.table)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+#fread by default create data table. 
+options(datatable.fread.datatable=TRUE)
+```
+#2 Reading the Node Results files   
+(Node results files sometimes cotain file for base network. Delete it manually)
+```{r, results="hide"}
+#********************************************************************************************************
+#Finidng att files 
+#Find and store the files which contains length in their names
+setwd(dir)
+
+files<-list.files(pattern="_Node Results_")
+#For Tesing the code logic
+file<-files[[1]]
+#Create empty data tables
+#da contains the Average values for delay, Qlen ...
+da<-data.table()
+#tda contains the second by second value for delay Qlen etc .... This is used to plot
+#residual queue at the start of green 
+tda<-data.table()
+#Loop through all the node evaluation files 
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/NodeFileReader.R")
+directory=dir
+buf1<-NodeFileReader(files,dir)
+da<-buf1[[1]]
+tda<-buf1[[2]]
+
+#The following code is needed if multiple runs are conducted
+#This code can be used to average out the values 
+da[,Qlen1:=round(mean(Qlen),digits = 2),by=list(no,dir)]
+da[,veh_delay1:=round(mean(veh_delay),digits = 2),by=list(no,dir)]
+da[,stop_delay1:=round(mean(stop_delay),digits = 2),by=list(no,dir)]
+da[,stops1:=round(mean(stops),digits = 2),by=list(no,dir)]
+da[,Qlen:=Qlen1]
+da[,veh_delay:=veh_delay1]
+da[,stop_delay:=stop_delay1]
+da[,stops:=stops1]
+da<-unique(da,by=c("no","dir"))
+da<-da[,.(no,dir,stops,veh_delay,Qlen)]
+fwrite(da,"avg_Q.csv")
+```
+#3 Read List of scenarios and Merge above data table. Plot Delay and Queue
+```{r, results="hide"}
+setnames(da,"no","Scenario")
+if(dir==dir1){
+  list_sen<-fread("List_of_senarios_Induc_60MPh_2ln.csv")
+
+}else{
+  list_sen<-fread("List_of_senarios_Radar_60MPh_2ln.csv")
+}
+setnames(list_sen,"S.No","Scenario")
+setnames(list_sen,"EBT Vol","EBT_Vol")
+setnames(list_sen,"Passage Time","Passage_time")
+list_sen[,Option:=as.character(Option)]
+list_sen[Option=="1",Option:="Stopbar Detector on Seperate Channel"]
+list_sen[Option=="3",Option:="All Detectors on Same Channel"]
+
+da<-merge(da,list_sen)
+
+
+gap_label<-c(`0.1`="0.1 Sec Passage time",`2.5`="2.5 Sec Passage time",`5`="5 Sec Passage time")
+vol_label<-c(`400`="400 veh/hr",`800`="800 veh/hr",`1200`="1200 veh/hr")
+da[dir=="all",dir:="All"]
+da[dir=="ebt",dir:="EBT"]
+da[dir=="nbt",dir:="NBT"]
+
+
+if(dir1==dir){
+  det_type<-"Induction Loop Detectors"
+}else{
+  det_type<-"Video Detectors"
+}
+
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code//GGplots_Function.R")\
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/GGplots_Function.R")
+library(RColorBrewer)
+darkcols <- brewer.pal(8, "Dark2")
+
+a<-det_plots(data1=da,
+  x1=factor(Passage_time),
+  y1=veh_delay,
+  fill1=factor(dir),
+  facet1=EBT_Vol~Option,
+  ylab1="Average Delay (veh-sec/sec)",
+  title1="Average Delay"
+)
+a<-a+ylim(0,80)
+
+b<-det_plots(data1=da,
+  x1=factor(Passage_time),
+  y1=Qlen,
+  fill1=factor(dir),
+  facet1=EBT_Vol~Option,
+  ylab1="Average Queue Length (ft/sec)",
+  title1="Average Queue Length"
+)
+b<-b+ylim(0,300)
+
+
+```
+
+
+#EBT
+#4 Read all the Signal Change Files. Read the notes in Detector Project notebook to understand the format
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+SdaEBT<-data.table()
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+SdaEBT<-scTimeRead_seed1(6,files)
+
+```
+
+#EBT Residual Queue
+#6 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda1<-tda
+tda1[,c("st","et"):=tstrsplit(tint,"-")]
+tda1[,et:=as.numeric(et)]
+tda1<-tda1[,.(et,no,run_no,dir,Qlen)]
+SdaEBT<-SdaEBT[Indi_cor=="amber"]
+tda1<-tda1[dir=="ebt",]
+EBT_residualQ<-merge(tda1,SdaEBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+EBT_residualQ<-EBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+EBT_residualQ<-EBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+EBT_residualQ<-unique(EBT_residualQ,by=c("no"))
+EBT_residualQ<-merge(EBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ<-det_plots_2(data1=EBT_residualQ,
+  x1=factor(Passage_time),
+  y1=AvgResQ,
+  fill1=factor(Passage_time),
+  facet1=EBT_Vol~Option,
+  ylab1="Average Residual Queue Length (ft/sec)",
+  title1="EBT Average Residual Queues"
+)
+gResQ<-gResQ+ylim(0,300)
+```
+
+# NBT Residual Queue
+#7 Read all the Signal Change Files. Read the notes in Detector Project notebook to understand the format
+#Reading files for phase 4 (NBT)
+```{r, results="hide"}
+#Finidng .lsa files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("S*lsa"))
+par(mfrow=c(2,2))
+SdaNBT<-data.table()
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScTimingReader.R")
+SdaNBT<-scTimeRead_seed1(4,files)
+```
+
+#NBT
+#9 Combine Signal data with queue data and Plot residual queues
+```{r, results="hide"}
+#**********************************************************************************************************************
+#**********************************************************************************************************************
+#Residual Queue at start of red or end of green  
+tda2<-tda
+tda2[,c("st","et"):=tstrsplit(tint,"-")]
+tda2[,et:=as.numeric(et)]
+tda2<-tda2[,.(et,no,run_no,dir,Qlen)]
+SdaNBT<-SdaNBT[Indi_cor=="amber"]
+tda2<-tda2[dir=="nbt",]
+NBT_residualQ<-merge(tda2,SdaNBT,by.x =c("no","run_no","et"),by.y=c("no","run_no","simS"))
+NBT_residualQ<-NBT_residualQ[,.(et,Qlen,dir,no,run_no)]
+NBT_residualQ<-NBT_residualQ[,AvgResQ:=mean(Qlen),by=list(no)]
+NBT_residualQ<-unique(NBT_residualQ,by=c("no"))
+NBT_residualQ<-merge(NBT_residualQ,list_sen,by.x="no",by.y="Scenario")
+
+gResQ1<-det_plots_2(data1=NBT_residualQ,
+  x1=factor(Passage_time),
+  y1=AvgResQ,
+  fill1=factor(Passage_time),
+  facet1=EBT_Vol~Option,
+  ylab1="Average Residual Queue Length (ft/sec)",
+  title1="NBT Average Residual Queues"
+)
+gResQ1<-gResQ1+ylim(0,100)
+
+
+```
+
+
+#C Reading the SC Detector record
+```{r}
+#Finidng .ldp files 
+#Find and store the files which contains length in their names
+files<-list.files(pattern=glob2rx("*.ldp"))
+file<-files[[1]]
+par(mfrow=c(2,2))
+SdaMax<-data.table()
+#source("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScDetectorRecordFileReader_HighSpeed.R")
+source("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/ScDetectorRecordFileReader_HighSpeed.R")
+
+store_SCL<-ScMaxOutFun_HgSpd(files,list_sen)
+SdaMax<-store_SCL[[1]]
+SdaMax<-SdaMax[,lapply(.SD,mean),by=list(no)]
+tp<-list_sen[,.(Scenario,Option)]
+SdaMax<-merge(SdaMax,tp,by.x="no",by.y="Scenario")
+
+gmax1a<-det_plots_2(data1=SdaMax,
+  x1=factor(PassageTime),
+  y1=Per_EBT_MaxOout,
+  fill1=factor(PassageTime),
+  facet1=EBT_Vol~Option,
+  ylab1="Percent Max Outs (%)",
+  title1="EBT Max Outs"
+)
+gmax1a<-gmax1a+ylim(0,100)
+
+gmax2a<-det_plots_2(data1=SdaMax,
+  x1=factor(PassageTime),
+  y1=Per_NBT_MaxOout,
+  fill1=factor(PassageTime),
+  facet1=EBT_Vol~Option,
+  ylab1="Percent Max Outs (%)",
+  title1="NBT Max Outs"
+)
+gmax2a<-gmax2a+ylim(0,100)
+
+```
+
+```{r}
+MeanTime<-store_SCL[[2]]
+MeanTime<-MeanTime[,lapply(.SD,mean),by=list(no)]
+MeanTime<-merge(MeanTime,tp,by.x="no",by.y="Scenario")
+
+AvgGr6<-det_plots_2(data1=MeanTime,
+  x1=factor(PassageTime),
+  y1=MeanGr6,
+  fill1=factor(PassageTime),
+  facet1=EBT_Vol~Option,
+  ylab1="Average EBT Green Time (sec)",
+  title1="Average EBT Green Time"
+)
+AvgGr6<-AvgGr6+ylim(0,80)
+
+AvgGr4<-det_plots_2(data1=MeanTime,
+  x1=factor(PassageTime),
+  y1=MeanGr4,
+  fill1=factor(PassageTime),
+  facet1=EBT_Vol~Option,
+  ylab1="Average NBT Green Time (sec)",
+  title1="Average NBT Green Time"
+)
+AvgGr4<-AvgGr4+ylim(0,30)
+```
+
+
+
+
+# Graphs for no of vehicles trapped in dilemma zone
+```{r}
+if(dir==dir1){
+#file<-"C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrm_Scenario_2ln/dilemma_zone.csv"
+file="/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrm_Scenario_2ln/dilemma_zone.csv"
+} else{
+#file<-"C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrmRadar_Scenario_2ln/dilemma_zone.csv"
+file="/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Through_UpStrmRadar_Scenario_2ln/dilemma_zone.csv"
+}
+
+#Create a data set to be used with dilemma zone:
+dil_sig<-store_SCL[[1]][,.(no,run_no,NumEBT_Phase)]
+# Graphs for no of vehicles trapped in dilemma zone
+dilemma_dat<-fread(file)
+dilemma_dat[,No:=.N,by=list(Scenario,Run)]
+dilemma_dat<-unique(dilemma_dat,by=c("Scenario","Run"))
+setnames(dilemma_dat,"No","VehDilZn")
+dilemma_dat<-merge(dilemma_dat,dil_sig,by.x=c("Scenario","Run"),by.y=c("no","run_no"))
+dilemma_dat[,VehDilZnPerCyc:=VehDilZn/NumEBT_Phase]
+dilemma_dat[,AvgVehDilZnPerCyc:=mean(VehDilZnPerCyc),by=Scenario]
+dilemma_dat<-unique(dilemma_dat,by=c("Scenario"))
+dilemma_dat<-dilemma_dat[,.(Scenario,AvgVehDilZnPerCyc)]
+dilemma_dat<-merge(list_sen,dilemma_dat,by="Scenario")
+
+
+Grdilemma<-det_plots_2(data1=dilemma_dat,
+  x1=factor(Passage_time),
+  y1=AvgVehDilZnPerCyc,
+  fill1=factor(Passage_time),
+  facet1=EBT_Vol~Option,
+  ylab1="Average Number of Vehicles Trapped in Dilemma Zone per Cycle",
+  title1="Average Number of Vehicles Trapped in Dilemma Zone"
+)
+Grdilemma<-Grdilemma+ylim(0,3)
+```
+
+
+
+
+#D Saving plots in pdf for printing 
+```{r}
+if(dir==dir1){
+  #pdf("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/HighSpd_Iduc.pdf")
+  pdf("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/HighSpd_Iduc.pdf")
+} else{
+  #pdf("C:/Users/a-bibeka/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/HighSpd_Radar.pdf")
+  pdf("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results/HighSpd_Radar.pdf")
+}
+a
+b
+Grdilemma
+gmax1a
+gmax2a
+gResQ
+gResQ1
+AvgGr6
+AvgGr4
+graphics.off()
+
+setwd("/Users/Apoorb/Dropbox/TTI_Projects/0-1-6934 TSC Settings Sunkari/Det_R_code/results")
+tiff("HgSpdDelay.tiff",width=17,height=18,units = "cm",res=1000)
+a
+graphics.off()
+tiff("HgSpdQueue.tiff",width=17,height=18,units = "cm",res=1000)
+b
+graphics.off()
+tiff("HgSpdEBMax.tiff",width=17,height=18,units = "cm",res=1000)
+gmax1a
+graphics.off()
+tiff("HgSpdDilZn.tiff",width=17,height=18,units = "cm",res=1000)
+Grdilemma
+graphics.off()
+tiff("HgSpdEBRes.tiff",width=17,height=18,units = "cm",res=1000)
+gResQ
+graphics.off()
+
+
+```
+
+
